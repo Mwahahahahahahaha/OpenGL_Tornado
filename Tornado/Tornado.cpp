@@ -7,15 +7,44 @@
 #include <chrono>
 #include <fstream>
 
-using namespace std;
+// ---Camera variables---
+float camX = 1.0f, camY = 0.0f, camZ = 5.0f;
+float targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f;
+float scaleX = 1.0f, scaleY = 1.0f, scaleZ = 1.0f;
+
+bool isPanning = false;      // Is the camera currently moving?
+float panProgress = 0.0f;    // 0.0 = Start (Tornado), 1.0 = End (House)
+float panSpeed = 0.005f;     // How fast the camera moves
+
+float startCamX = 0.0f, startCamY = 15.0f, startCamZ = 25.0f;
+float startTargetX = 0.0f, startTargetY = 2.0f, startTargetZ = 0.0f;
+
+float endCamX = -30.0f, endCamY = 1.0f, endCamZ = 20.0f;
+float endTargetX = 40.0f, endTargetY = 2.0f, endTargetZ = 0.0f;
+
+// ---Tornado world position variables---
+float tornadoPosX = 0.0f;
+float tornadoPosY = 0.0f;
+float tornadoPosZ = 0.0f;
+float tornadoSpeed = 1.0f;
+
+// ---House world position variables---
+float housePosX = -25.0f;
+float housePosY = 1.0f;
+float housePosZ = 20.0f;
+
+// ---Collision variables---
+float houseRadius = 4.0f;
+float tornadoRadius = 3.0f;
+bool houseDestroyed = false;
 
 float globalTime = 0.0f;
 const float dt = 0.016f; //timestep is 60 fps = 1/60 = 0.016
 
 class RandomNumberEngine {
 private:
-    random_device rd;
-    mt19937 gen;
+    std::random_device rd;
+    std::mt19937 gen;
 
 public:
     RandomNumberEngine() : gen(rd()){}
@@ -28,7 +57,6 @@ public:
     float angle() {
         return range(0.0f, 6.28318f); //0 to 2pi
     }
-
 };
 
 class StarField {
@@ -37,7 +65,7 @@ private:
         float x, y, z;
     };
 
-    vector<Star> stars;
+    std::vector<Star> stars;
     int count;
     float width, height, depth;
 
@@ -77,10 +105,10 @@ private:
         float x, y, z, angle;
     };
 
-    vector<Grain> grains;
+    std::vector<Grain> grains;
     const int maxParticles = 4000;
 
-    const float height = 10.0f,     //limit to the height the tornado can reach      
+    const float height = 15.0f,     //limit to the height the tornado can reach      
                 swayAmount = 1.0f,  //how much the tornado sways left/right
                 swaySpeed = 0.5f;   //how fast it sways
 
@@ -184,25 +212,6 @@ GLuint loadBMP(const char* filename) {
 
     delete[] data;
     return texID;
-}
-
-//Camera
-float camX = 1.0f, camY = 0.0f, camZ = 5.0f;
-float targetX = 0.0f, targetY = 0.0f, targetZ = 0.0f;
-float scaleX = 1.0f, scaleY = 1.0f, scaleZ = 1.0f;
-
-bool isPanning = false;      // Is the camera currently moving?
-float panProgress = 0.0f;    // 0.0 = Start (Tornado), 1.0 = End (House)
-float panSpeed = 0.005f;     // How fast the camera moves
-
-float startCamX = 0.0f, startCamY = 6.0f, startCamZ = 15.0f;
-float startTargetX = 0.0f, startTargetY = 2.0f, startTargetZ = 0.0f;
-
-float endCamX = -30.0f, endCamY = 1.0f, endCamZ = 20.0f;
-float endTargetX = 40.0f, endTargetY = 2.0f, endTargetZ = 0.0f;
-
-//Plane
-void drawPlane() {
 }
 
 //Cube for House
@@ -355,9 +364,8 @@ void drawGround() {
     glEnd();
 }
 
-StarField starField(200, 40.0f, 25.0f, 40.0f);
+StarField starField(200, 100.0f, 25.0f, 100.0f);
 Tornado tornado;
-
 
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); //clears color and depth values of previous frame
@@ -370,20 +378,46 @@ void display() {
     
     drawGround();
     starField.draw();
-    tornado.draw();
 
     glPushMatrix();
-    glTranslatef(-25.0f, 1.0f, 20.0f);
-    glRotatef(-100.0f, 0.0f, 1.0f, 0.0f);
-    house();
+    glTranslatef(tornadoPosX, 0.0f, tornadoPosZ);
+    tornado.draw();
     glPopMatrix();
+
+    if (!houseDestroyed) {
+        glPushMatrix();
+        glTranslatef(-25.0f, 1.0f, 20.0f);
+        glRotatef(-100.0f, 0.0f, 1.0f, 0.0f);
+        house();
+        glPopMatrix();
+    }
 
     glutSwapBuffers();
 }
 
 void timer(int) {
-    globalTime += dt;               //to track the time in the scene
+    globalTime += dt;
+
+    // ---Moves the tornado toward the house---
+    float dx = housePosX - tornadoPosX;
+    float dz = housePosZ - tornadoPosZ;
+
+    float dist = sqrt(dx * dx + dz * dz);
+
+    if (dist > 0.001f) {
+        dx /= dist;
+        dz /= dist;
+
+        tornadoPosX += dx * tornadoSpeed * dt;
+        tornadoPosZ += dz * tornadoSpeed * dt;
+    }
+
     tornado.update();
+
+    // ---Check for collision---
+    if (!houseDestroyed && dist < houseRadius+tornadoRadius)
+        houseDestroyed = true;
+
     if (isPanning) {
         if (panProgress < 1.0f) {
             panProgress += panSpeed;
@@ -400,6 +434,7 @@ void timer(int) {
             targetZ = startTargetZ + (endTargetZ - startTargetZ) * panProgress;
         }
     }
+
     glutPostRedisplay();
     glutTimerFunc(16, timer, 0);
 }
@@ -448,7 +483,7 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);   //double buffering | rgb color model | enables 3d depth (z buffer)
     glutInitWindowSize(1200, 720);
     glutCreateWindow("Tornado");
-
+    
     glEnable(GL_DEPTH_TEST);                                    //objects hide behind others
     glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
     
