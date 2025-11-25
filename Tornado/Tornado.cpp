@@ -40,17 +40,30 @@ float tornadoPosX = 0.0f;
 float tornadoPosY = 0.0f;
 float tornadoPosZ = 0.0f;
 float tornadoSpeed = 2.0f;
-bool tornadoActive = false;
 
 // ---House world position variables---
 float housePosX = -25.0f;
 float housePosY = 1.0f;
 float housePosZ = 20.0f;
 
+bool houseCaught = false;
+float caughtYOffset = 0.0f;
+float caughtAngle = 0.0f;
+float caughtDistance = 5.0f;
+
+//random rotation angle for house when caught
+bool spinInit = false;
+float houseRotX = 0.0f;
+float houseRotY = 0.0f;
+float houseRotZ = 0.0f;
+
+float houseRotVelX = 0.0f;
+float houseRotVelY = 0.0f;
+float houseRotVelZ = 0.0f;
+
 // ---Collision variables---
-float houseRadius = 4.0f;
-float tornadoRadius = 3.0f;
-bool houseDestroyed = false;
+float houseRadius = 1.0f;
+float tornadoRadius = 2.0f;
 
 float globalTime = 0.0f;
 const float dt = 0.016f; // timestep is 60 fps = 1/60 = 0.016
@@ -337,8 +350,8 @@ void texturedRoof(float width, float height, float depth, GLuint texture, float 
 
 }
 
-// 3D Box
-void house() {
+// ---Display Functions---
+void drawHouse() {
     glMatrixMode(GL_MODELVIEW);
 
     glScalef(scaleX, scaleY, scaleZ);
@@ -348,7 +361,7 @@ void house() {
 
     glTranslatef(0, 1, 0);
     glPushMatrix();                     // Roof
-    texturedRoof(2.50, 1, 2, texDoor);  // <- please change this it sucks ass
+    texturedRoof(2.50, 1, 2, texDoor);
     glPopMatrix();
 
     glPushMatrix();						// Door
@@ -360,7 +373,7 @@ void house() {
     glPushMatrix();					    // Window
     glTranslatef(-.415, -0.85, 1);
     glScalef(1.25, 1.25, 0.01);
-    texturedCube(.5, texWindow, 1.0f);  // This texture sucks ass
+    texturedCube(.5, texWindow, 1.0f);
     glPopMatrix();
 
     glPopMatrix();
@@ -368,7 +381,6 @@ void house() {
     glFlush();
 }
 
-// --Display Functions--
 void drawGround() {
     glColor3f(0.45f, 0.35f, 0.25f);
 
@@ -395,52 +407,67 @@ void display() {
     drawGround();
     starField.draw();
 
+	// ---Draw Tornado---
     glPushMatrix();
     glTranslatef(tornadoPosX, 0.0f, tornadoPosZ);
     tornado.draw();
     glPopMatrix();
+    
+	// ---Draw House---
+    glPushMatrix();
+    glTranslatef(housePosX, housePosY, housePosZ);
 
-    if (!houseDestroyed) {
-        glPushMatrix();
-        glTranslatef(-25.0f, 1.0f, 20.0f);
-        glRotatef(-100.0f, 0.0f, 1.0f, 0.0f);
-        house();
-        glPopMatrix();
-    }
+    // House faces camera in SCENE_HOUSE
+    glRotatef(-100.0f, 0, 1, 0);
+
+	// Tumbling rotation when caught
+    glRotatef(houseRotX, 1, 0, 0);
+    glRotatef(houseRotY, 0, 1, 0);
+    glRotatef(houseRotZ, 0, 0, 1);
+    drawHouse();
+    glPopMatrix();
 
     glutSwapBuffers();
 }
 
-void timer(int) {
-    globalTime += dt;
-    tornado.update();
+// ---Active Scene Logic---
+void houseSwirlLogic() {
+    // ---House movement once caught by the tornado---
+    if (!houseCaught)
+        return;
 
-	// ---Activate tornado movement---
-    if (currentScene == SCENE_TORNADO_CHASE)
-		tornadoActive = true;
-
-    // ---Moves the tornado toward the house---
-    if (tornadoActive) {
-        float dx = housePosX - tornadoPosX;
-        float dz = housePosZ - tornadoPosZ;
-
-        float dist = sqrt(pow(dt, 2.0) + pow(dz, 2.0));
-
-        if (dist > 0.001f) {
-            dx /= dist;
-            dz /= dist;
-
-            tornadoPosX += dx * tornadoSpeed * dt;
-            tornadoPosZ += dz * tornadoSpeed * dt;
-        }
-
-        // ---Check for collision---
-        if (!houseDestroyed && dist < houseRadius + tornadoRadius)
-            houseDestroyed = true;
+	// only assign random spin velocities once when house is caught
+    if (!spinInit) {
+        houseRotVelX = (rand() % 200 - 100) * 0.05f;  // -5 to +5 degrees per frame
+        houseRotVelY = (rand() % 200 - 100) * 0.05f;
+        houseRotVelZ = (rand() % 200 - 100) * 0.05f;
+		spinInit = true;
     }
 
-	// ---Camera Panning Logic | State machine---
-    if (currentScene == SCENE_HOUSE) {
+    houseRotX += houseRotVelX;
+    houseRotY += houseRotVelY;
+    houseRotZ += houseRotVelZ;
+
+    caughtYOffset += 0.02f;
+
+    caughtAngle += 0.05f;
+    if (caughtAngle > 6.28318f)
+        caughtAngle -= 6.28318f;
+
+    // Make house orbit tornado
+    housePosX = tornadoPosX + cosf(caughtAngle) * caughtDistance;
+    housePosZ = tornadoPosZ + sinf(caughtAngle) * caughtDistance;
+
+    housePosY = 1.0f + caughtYOffset;
+}
+
+void cameraPanLogic() {
+    if (currentScene == SCENE_TORNADO) {
+        // Static camera position for tornado scene
+        camX = tornadoCamX; camY = tornadoCamY; camZ = tornadoCamZ;
+        targetX = tornadoTargetX; targetY = tornadoTargetY; targetZ = tornadoTargetZ;
+    }
+    else if (currentScene == SCENE_HOUSE) {
         panProgress += panSpeed;
         if (panProgress > 1.0f)
             panProgress = 1.0f;
@@ -455,16 +482,46 @@ void timer(int) {
         targetZ = tornadoTargetZ + (houseTargetZ - tornadoTargetZ) * panProgress;
     }
     else if (currentScene == SCENE_TORNADO_CHASE) {
-        // camera follows tornado position
-		camX = tornadoPosX - chaseOffsetX; 
-        camY = tornadoPosY + chaseOffsetY;
-        camZ = tornadoPosZ - chaseOffsetZ;
+        if (!houseCaught) {
+            // camera follows tornado position
+            camX = tornadoPosX - chaseOffsetX;
+            camY = tornadoPosY + chaseOffsetY;
+            camZ = tornadoPosZ - chaseOffsetZ;
 
-        // look at midpoint between tornado and house
-		targetX = (tornadoPosX + housePosX) * 0.5f; 
-        targetY = 2.0f;
-        targetZ = (tornadoPosZ + housePosZ) * 0.5f;
+            // look at midpoint between tornado and house
+            targetX = (tornadoPosX + housePosX) * 0.5f;
+            targetY = 2.0f;
+            targetZ = (tornadoPosZ + housePosZ) * 0.5f;
+        }
     }
+}
+
+void timer(int) {
+    globalTime += dt;
+    tornado.update();
+
+    if (currentScene == SCENE_TORNADO_CHASE) {
+        float dx = housePosX - tornadoPosX;
+        float dz = housePosZ - tornadoPosZ;
+
+        float dist = sqrt(pow(dx, 2.0) + pow(dz, 2.0));
+
+        if (dist > 0.001f) {
+            dx /= dist;
+            dz /= dist;
+
+            tornadoPosX += dx * tornadoSpeed * dt;
+            tornadoPosZ += dz * tornadoSpeed * dt;
+        }
+
+        // ---Check for collision---
+        if (!houseCaught && dist < houseRadius + tornadoRadius)
+            houseCaught = true;
+    }
+
+	houseSwirlLogic();
+	cameraPanLogic();
+    
 
     glutPostRedisplay();
     glutTimerFunc(16, timer, 0);
@@ -529,9 +586,6 @@ int main(int argc, char** argv) {
     glLoadIdentity();
     gluPerspective(60, 1200.0 / 720.0, 1, 100);                 // 60 degs (camera fov(vertical) | 1200720 aspect ratio of window | ` near clipping plane (dont draw things up close) | 100 far clipping plane (dont draw things too far))
     glMatrixMode(GL_MODELVIEW);
-
-    camX = tornadoCamX; camY = tornadoCamY; camZ = tornadoCamZ;
-    targetX = tornadoTargetX; targetY = tornadoTargetY; targetZ = tornadoTargetZ;
 
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
